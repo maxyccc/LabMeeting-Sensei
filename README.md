@@ -41,6 +41,12 @@ This creates:
 - `HorizontalLayout`, `VerticalLayout`, `AdaptiveGridLayout`
 - `create_presentation()`, `insert_slide()`, `save_presentation()`
 
+`insert_slide()` supports two input modes:
+
+- `insert_slide("some.png", prs)`: add one flattened image to the slide.
+- `insert_slide(layout, prs)`: call `layout.place(...)` and add each element as an individual picture shape.
+  Text is currently inserted as rendered image (not editable textbox).
+
 ## Practical use
 
 `example_create_slides.py` is the template.
@@ -52,6 +58,10 @@ For example, the script:
 3. Builds a nested layout with `HorizontalLayout(...)` and `VerticalLayout(...)`.
 4. Renders `example_result.png`.
 5. Inserts that image into `example_result.pptx`.
+
+To keep elements selectable in PowerPoint, replace step 5 with:
+
+6. Call `insert_slide(final_layout, ppt)` instead of inserting a rendered PNG path.
 
 Input figures (partial) used by the script:
 

@@ -46,6 +46,10 @@ if __name__ == "__main__":
     ])
     final_layout.render().save("example_result.png")
 
-    ppt = create_presentation()
-    insert_slide("example_result.png", ppt)
-    save_presentation(ppt, "./example_result.pptx")
+    ppt_flat = create_presentation()
+    insert_slide("example_result.png", ppt_flat)
+    save_presentation(ppt_flat, "./example_result.pptx")
+
+    ppt_editable = create_presentation()
+    insert_slide(final_layout, ppt_editable)
+    save_presentation(ppt_editable, "./example_result_editable.pptx")

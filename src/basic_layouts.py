@@ -37,10 +37,14 @@ class Layout(ABC):
     def render(self, size: Optional[Size] = None) -> Image.Image:
         ...
 
+    @abstractmethod
+    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+        ...
+
 
 class BlankLayout(Layout):
     def __init__(self, size: Optional[Size] = None, *args, **kwargs):
-        self.size = size or Size(1, 1)
+        self.size = size or Size(0, 0)
     
     def natural_size(self) -> Size:
         return self.size
@@ -48,6 +52,9 @@ class BlankLayout(Layout):
     def render(self, size: Optional[Size] = None) -> Image.Image:
         size = size or self.natural_size()
         return Image.new("RGBA", (size.w, size.h), BG_COLOR)
+    
+    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+        return []
 
 
 class SingleImageLayout(Layout):
@@ -71,6 +78,12 @@ class SingleImageLayout(Layout):
         size = size or self.natural_size()
         bbox = size.inset(self.padding)
         return place_padding(fit_image(self.image, bbox, self.fit), self.padding)
+    
+    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+        size = size or self.natural_size()
+        bbox = size.inset(self.padding)
+        img = fit_image(self.image, bbox, self.fit)
+        return [(self.padding.left, self.padding.top, img),]
 
 
 class SingleTextLayout(Layout):
@@ -111,6 +124,10 @@ class SingleTextLayout(Layout):
             (self.padding.left, self.padding.top), self.text, align=self.align, fill=self.color
         )
         return canvas
+    
+    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+        size = size or self.natural_size()
+        return [(0, 0, self.render(size))]
 
 
 class HorizontalLayout(Layout):
@@ -129,6 +146,8 @@ class HorizontalLayout(Layout):
         self.weights = weights or [c.natural_size().w for c in self.children]
 
     def natural_size(self) -> Size:
+        if not self.children:
+            return Size(self.padding.left + self.padding.right, self.padding.top + self.padding.bottom)
         sizes = [c.natural_size() for c in self.children]
         w = sum(s.w for s in sizes) + sum(self.gaps) + self.padding.left + self.padding.right
         h = max(s.h for s in sizes) + self.padding.top + self.padding.bottom
@@ -154,6 +173,25 @@ class HorizontalLayout(Layout):
                 x += self.gaps[i]
         return canvas
     
+    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+        size = size or self.natural_size()
+
+        bbox = size.inset(self.padding)
+        available_w = max(1, bbox.w - sum(self.gaps))
+        available_h = max(1, bbox.h)
+        chidren_widths = _split_sizes(available_w, len(self.children), self.weights)
+
+        placements: List[Tuple[int, int, Image.Image]] = []
+        x = self.padding.left
+        last_index = len(self.children) - 1
+        for i, (child, child_width) in enumerate(zip(self.children, chidren_widths)):
+            for cx, cy, cimg in child.place(Size(child_width, available_h)):
+                placements.append((x + cx, self.padding.top + cy, cimg))
+            x += child_width
+            if i < last_index:
+                x += self.gaps[i]
+        return placements
+    
 
 class VerticalLayout(Layout):
     def __init__(
@@ -171,6 +209,8 @@ class VerticalLayout(Layout):
         self.weights = weights or [c.natural_size().h for c in self.children]
 
     def natural_size(self) -> Size:
+        if not self.children:
+            return Size(self.padding.left + self.padding.right, self.padding.top + self.padding.bottom)
         sizes = [c.natural_size() for c in self.children]
         w = max(s.w for s in sizes) + self.padding.left + self.padding.right
         h = sum(s.h for s in sizes) + sum(self.gaps) + self.padding.top + self.padding.bottom
@@ -195,6 +235,25 @@ class VerticalLayout(Layout):
             if i < last_index:
                 y += self.gaps[i]
         return canvas
+    
+    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+        size = size or self.natural_size()
+
+        bbox = size.inset(self.padding)
+        available_w = max(1, bbox.w)
+        available_h = max(1, bbox.h - sum(self.gaps))
+        chidren_heights = _split_sizes(available_h, len(self.children), self.weights)
+
+        placements: List[Tuple[int, int, Image.Image]] = []
+        y = self.padding.top
+        last_index = len(self.children) - 1
+        for i, (child, child_height) in enumerate(zip(self.children, chidren_heights)):
+            for cx, cy, cimg in child.place(Size(available_w, child_height)):
+                placements.append((self.padding.left + cx, y + cy, cimg))
+            y += child_height
+            if i < last_index:
+                y += self.gaps[i]
+        return placements
 
 
 class AdaptiveGridLayout(Layout):
@@ -214,11 +273,15 @@ class AdaptiveGridLayout(Layout):
         self.padding = formalize_padding(padding)
 
     def _adaptive_grid(self, N: int, cell_aspect_ratio: float, render_aspect_ratio: float) -> Tuple[int, int]:
+        if N <= 0:
+            return 0, 0
         n_cols = math.ceil(math.sqrt(N * cell_aspect_ratio / render_aspect_ratio))
         n_rows = math.ceil(N / n_cols)
         return n_cols, n_rows
     
     def natural_size(self) -> Size:
+        if not self.children:
+            return Size(self.padding.left + self.padding.right, self.padding.top + self.padding.bottom)
         n_cols, n_rows = self._adaptive_grid(len(self.children), 1.0, 1.0)
         sizes = [c.natural_size() for c in self.children]
         w = max(s.w for s in sizes) * n_cols + self.col_gap * (n_cols - 1) + self.padding.left + self.padding.right
@@ -227,6 +290,8 @@ class AdaptiveGridLayout(Layout):
     
     def render(self, size: Optional[Size] = None) -> Image.Image:
         size = size or self.natural_size()
+        if not self.children:
+            return Image.new("RGBA", (size.w, size.h), BG_COLOR)
         
         bbox = size.inset(self.padding)
         sizes = [c.natural_size() for c in self.children]
@@ -237,16 +302,48 @@ class AdaptiveGridLayout(Layout):
         cell_h = (bbox.h - self.row_gap * (n_rows - 1)) // n_rows
         
         canvas = Image.new("RGBA", (size.w, size.h), BG_COLOR)
-        x = self.padding.top
+        y = self.padding.top
         for i in range(n_rows):
-            y = self.padding.left
+            x = self.padding.left
             for j in range(n_cols):
-                child = self.children[i * n_cols + j]
+                idx = i * n_cols + j
+                if idx >= len(self.children):
+                    break
+                child = self.children[idx]
                 child_img = child.render(Size(cell_w, cell_h))
                 dw, dh = paste_offset(Size(cell_w, cell_h), Size(child_img.width, child_img.height))
                 canvas.paste(child_img, (x + dw, y + dh), child_img)
-                y += cell_w + self.col_gap
-            x += cell_h + self.row_gap
+                x += cell_w + self.col_gap
+            y += cell_h + self.row_gap
         return canvas
+    
+    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+        size = size or self.natural_size()
+        if not self.children:
+            return []
+
+        bbox = size.inset(self.padding)
+        sizes = [c.natural_size() for c in self.children]
+        max_child_aspect_ratio = max(s.w for s in sizes) / max(s.h for s in sizes)
+        n_cols, n_rows = self._adaptive_grid(
+            len(self.children), cell_aspect_ratio=max_child_aspect_ratio, render_aspect_ratio=bbox.w / bbox.h
+        )
+        cell_w = (bbox.w - self.col_gap * (n_cols - 1)) // n_cols
+        cell_h = (bbox.h - self.row_gap * (n_rows - 1)) // n_rows
+
+        placements: List[Tuple[int, int, Image.Image]] = []
+        y = self.padding.top
+        for i in range(n_rows):
+            x = self.padding.left
+            for j in range(n_cols):
+                idx = i * n_cols + j
+                if idx >= len(self.children):
+                    break
+                child = self.children[idx]
+                for cx, cy, cimg in child.place(Size(cell_w, cell_h)):
+                    placements.append((x + cx, y + cy, cimg))
+                x += cell_w + self.col_gap
+            y += cell_h + self.row_gap
+        return placements
 
 
