@@ -117,7 +117,6 @@ class SingleTextLayout(Layout):
     
     def render(self, size: Optional[Size] = None) -> Image.Image:
         size = size or self.natural_size()
-        print(size.w, size.h)
         canvas = Image.new("RGBA", (size.w, size.h), BG_COLOR)
         d = ImageDraw.Draw(canvas)
         d.multiline_text(
