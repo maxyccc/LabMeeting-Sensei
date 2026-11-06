@@ -1,5 +1,7 @@
 20*
 temp*
+/arial
+.vscode
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

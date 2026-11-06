@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw, ImageFont
 from abc import ABC, abstractmethod
 
 from src.images import FitMode, Size, fit_image, formalize_padding, load_image, place_padding, paste_offset
-from src.settings import BG_COLOR
+from src.settings import BG_COLOR, DEFAULT_TTF, DPI
 
 
 def _split_sizes(total: int, parts: int, weights: Sequence[float]) -> List[int]:
@@ -86,45 +86,98 @@ class SingleImageLayout(Layout):
         return [(self.padding.left, self.padding.top, img),]
 
 
-class SingleTextLayout(Layout):
+class SingleTextLayout:
     def __init__(
-            self,
-            text: str,
-            *,
+        self,
+        text: str,
+        *,
+        padding: Union[int, Tuple[int, int], Tuple[int, int, int, int]] = 0,
+        font_size: int = 32,
+        color: str = "black",
 
-            padding: Union[int, Tuple[int, int], Tuple[int, int, int, int]] = 0,
-            font_size: int = 32,
-            color: str = "black",
-            align: str = "left",  # left, center, right
+        align: str = "left",     # left, center, right  (horizontal)
+        valign: str = "middle",     # top, middle, bottom  (vertical)
 
-            fit: FitMode = FitMode.CONTAIN,
+        font_path: Optional[str] = DEFAULT_TTF,  # e.g. "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        line_spacing: int = 4,
     ):
         self.text = text
         self.padding = formalize_padding(padding)
         self.font_size = font_size
         self.color = color
         self.align = align
-        self.fit = fit
-    
+        self.valign = valign
+        self.font_path = font_path
+        self.line_spacing = line_spacing
+
+    def _font(self) -> ImageFont.ImageFont:
+        # Prefer a TrueType font so "font_size" behaves like you expect.
+        if self.font_path:
+            return ImageFont.truetype(self.font_path, self.font_size)
+        # Fallback that exists on many systems; if it fails, Pillow loads a tiny default font.
+        try:
+            return ImageFont.truetype("DejaVuSans.ttf", self.font_size)
+        except Exception:
+            return ImageFont.load_default()
+
+    def _measure(self, draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont) -> Tuple[int, int]:
+        l, t, r, b = draw.multiline_textbbox(
+            (0, 0),
+            self.text,
+            font=font,
+            spacing=self.line_spacing,
+            align=self.align,
+        )
+        return int(math.ceil(r - l)), int(math.ceil(b - t))
+
     def natural_size(self) -> Size:
         dummy = Image.new("RGBA", (1, 1), BG_COLOR)
         d = ImageDraw.Draw(dummy)
-        l, t, r, b = d.multiline_textbbox(
-            (0, 0), self.text, align=self.align
-        )
-        w, h = math.ceil((r - l) + self.padding.left + self.padding.right), math.ceil((b - t) + self.padding.top + self.padding.bottom)
-        return Size(max(1, w), max(1, h))
-    
+        font = self._font()
+        tw, th = self._measure(d, font)
+        w = max(1, tw + self.padding.left + self.padding.right)
+        h = max(1, th + self.padding.top + self.padding.bottom)
+        return Size(w, h)
+
     def render(self, size: Optional[Size] = None) -> Image.Image:
         size = size or self.natural_size()
         canvas = Image.new("RGBA", (size.w, size.h), BG_COLOR)
         d = ImageDraw.Draw(canvas)
+        font = self._font()
+
+        # Text area (inside padding)
+        area_w = max(1, size.w - self.padding.left - self.padding.right)
+        area_h = max(1, size.h - self.padding.top - self.padding.bottom)
+
+        tw, th = self._measure(d, font)
+
+        # Horizontal placement
+        if self.align == "center":
+            x = self.padding.left + (area_w - tw) // 2
+        elif self.align == "right":
+            x = self.padding.left + (area_w - tw)
+        else:  # left
+            x = self.padding.left
+
+        # Vertical placement
+        if self.valign in ("middle", "center"):
+            y = self.padding.top + (area_h - th) // 2
+        elif self.valign == "bottom":
+            y = self.padding.top + (area_h - th)
+        else:  # top
+            y = self.padding.top
+
         d.multiline_text(
-            (self.padding.left, self.padding.top), self.text, align=self.align, fill=self.color
+            (x, y),
+            self.text,
+            font=font,
+            fill=self.color,
+            spacing=self.line_spacing,
+            align=self.align,
         )
         return canvas
-    
-    def place(self, size: Optional[Size] = None) -> List[Tuple[int, int, Image.Image]]:
+
+    def place(self, size: Optional[Size] = None):
         size = size or self.natural_size()
         return [(0, 0, self.render(size))]
 
